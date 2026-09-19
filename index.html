@@ -256,6 +256,34 @@ function statusBadge(m) {
   return `<span class="badge">${m.st || m.status || ""}</span>`;
 }
 
+// ---- otomatik isim zenginleştirme ----
+const attemptedIds = new Set();
+let enriching = false;
+
+async function enrichNames(matchIds) {
+  if (enriching || matchIds.length === 0) return;
+  enriching = true;
+  try {
+    const res = await fetch("/api/details?ids=" + matchIds.map(encodeURIComponent).join(","));
+    const json = await res.json();
+    if (json.success) {
+      let changed = false;
+      for (const id of matchIds) {
+        const d = json.data[id];
+        if (!d) continue;
+        if (d.home && !NAMES.team[d.homeId]) { NAMES.team[d.homeId] = d.home; changed = true; }
+        if (d.away && !NAMES.team[d.awayId]) { NAMES.team[d.awayId] = d.away; changed = true; }
+        if (d.league && !NAMES.league[d.leagueId]) { NAMES.league[d.leagueId] = d.league; changed = true; }
+      }
+      if (changed) { saveNames(NAMES); render(); }
+    }
+  } catch {
+    // sessizce geç, manuel isimlendirme yedek olarak kalır
+  } finally {
+    enriching = false;
+  }
+}
+
 function render() {
   const rowsEl = document.getElementById("rows");
   const emptyEl = document.getElementById("empty");
@@ -263,6 +291,7 @@ function render() {
 
   const activeFilters = [...state.active];
   let shown = 0;
+  const needsEnrich = [];
 
   for (const m of state.matches) {
     if (!statusAllowed(m.status)) continue;
@@ -272,6 +301,12 @@ function render() {
     if (!passes) continue;
 
     shown++;
+
+    const missingName = !NAMES.team[m.homeId] || !NAMES.team[m.awayId] || !NAMES.league[m.leagueId];
+    if (missingName && !attemptedIds.has(m.id) && needsEnrich.length < 40) {
+      needsEnrich.push(m.id);
+    }
+
     const tr = document.createElement("tr");
 
     const iyText = (m.hp1 !== null && m.ap1 !== null) ? `${m.hp1}-${m.ap1}` : "—";
@@ -302,6 +337,11 @@ function render() {
   emptyEl.style.display = shown === 0 ? "block" : "none";
   document.getElementById("summary").textContent =
     `${shown} maç gösteriliyor (${state.matches.length} toplam) — son güncelleme: ${new Date().toLocaleTimeString("tr-TR")}`;
+
+  if (needsEnrich.length > 0) {
+    needsEnrich.forEach(id => attemptedIds.add(id));
+    enrichNames(needsEnrich);
+  }
 }
 
 async function fetchMatches() {

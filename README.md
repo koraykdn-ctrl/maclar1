@@ -23,18 +23,20 @@ Birden fazla filtre seçilirse **VE (AND)** mantığıyla çalışır.
 
 ## Takım / lig isimleri
 
-Kaynak API takım ve lig **isim** vermiyor, sadece ID veriyor (`homeId`,
-`awayId`, `leagueId`). Bu yüzden başlangıçta "Takım #287" gibi görünür.
+Liste ilk yüklendiğinde ekranda görünen (filtreye uyan) maçlar için arka
+planda `/api/details` çağrılır — bu, `santra24.6stats.com/.../match/{id}`
+endpoint'inden gerçek takım ve lig adını çeker ve tarayıcının
+`localStorage`'ına kaydeder. Bir sonraki sefer aynı ID göründüğünde tekrar
+istek atmaz.
 
-Bir takım veya lig adına **tıklayınca** ona kalıcı bir isim atayabilirsin —
-bu eşleme tarayıcının `localStorage`'ında saklanır, bir daha o ID her
-göründüğünde otomatik gösterilir. Zamanla sık karşılaştığın takımları
-isimlendirdikçe liste daha okunaklı hale gelir.
+Otomatik gelmeyen ya da farklı görmek istediğin bir isim varsa, takım/lig
+adına **tıklayıp** manuel değiştirebilirsin — bu değişiklik otomatik
+doldurmanın önüne geçer ve kalıcı kalır.
 
-(İleride gerçek bir takım/lig isim endpoint'i bulunursa, `api/matches.js`
-içine kolayca eklenip otomatik doldurma yapılabilir — DevTools → Network'te
-bir maç detayına tıklarken çıkan `team`/`league` geçen bir istek ararsan
-bana ilet, entegre ederim.)
+`/api/details` bir seferde en fazla 60 maçı zenginleştirir (üst API'ye aşırı
+yüklenmemek için), bu yüzden çok geniş bir filtre sonucunda ilk birkaç
+saniye bazı satırlar "Takım #…" olarak görünüp sonra gerçek isme
+dönüşebilir.
 
 ## Deploy (Vercel)
 
