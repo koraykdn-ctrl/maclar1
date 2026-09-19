@@ -59,15 +59,40 @@
   }
   .chip input { display: none; }
 
-  .status-row {
+  .status-tabs {
     display: flex;
-    gap: 10px;
+    gap: 6px;
     align-items: center;
     font-size: 13px;
-    color: var(--muted);
-    margin-bottom: 6px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
   }
-  .status-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .status-tab {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+  }
+  .status-tab .count {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: 4px;
+  }
+  .status-tab.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: #fff;
+  }
+  .status-tab.active .count { color: #fff; opacity: .85; }
+  .status-tab.fixture.active {
+    border-color: var(--live);
+    background: rgba(224,167,47,.18);
+    color: var(--live);
+  }
 
   .toolbar {
     display: flex;
@@ -150,11 +175,10 @@
 
   <div class="filters" id="filters"></div>
 
-  <div class="status-row">
-    <span>Durum:</span>
-    <label><input type="checkbox" id="st-playing" checked /> Devam eden</label>
-    <label><input type="checkbox" id="st-played" checked /> Biten</label>
-    <label><input type="checkbox" id="st-fixture" /> Henüz başlamamış</label>
+  <div class="status-tabs" id="status-tabs">
+    <div class="status-tab active" data-status="Playing">Devam eden <span class="count" id="cnt-Playing"></span></div>
+    <div class="status-tab active" data-status="Played">Biten <span class="count" id="cnt-Played"></span></div>
+    <div class="status-tab fixture" data-status="Fixture">Henüz başlamamış <span class="count" id="cnt-Fixture"></span></div>
   </div>
 
   <div class="toolbar">
@@ -198,6 +222,7 @@ const FILTERS = [
 
 const state = {
   active: new Set(),
+  status: new Set(["Playing", "Played"]), // sekmelerle seçilen durumlar
   matches: [],
 };
 
@@ -238,15 +263,30 @@ FILTERS.forEach(f => {
   filtersEl.appendChild(chip);
 });
 
-document.getElementById("st-playing").addEventListener("change", render);
-document.getElementById("st-played").addEventListener("change", render);
-document.getElementById("st-fixture").addEventListener("change", render);
+// ---- durum sekmeleri (Devam eden / Biten / Henüz başlamamış) ----
+document.querySelectorAll(".status-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    const s = tab.dataset.status;
+    if (state.status.has(s)) state.status.delete(s);
+    else state.status.add(s);
+    tab.classList.toggle("active", state.status.has(s));
+    render();
+  });
+});
 
 function statusAllowed(status) {
-  if (status === "Playing" && document.getElementById("st-playing").checked) return true;
-  if (status === "Played" && document.getElementById("st-played").checked) return true;
-  if (status === "Fixture" && document.getElementById("st-fixture").checked) return true;
-  return false;
+  return state.status.has(status);
+}
+
+function updateStatusCounts() {
+  const counts = { Playing: 0, Played: 0, Fixture: 0 };
+  for (const m of state.matches) {
+    if (counts[m.status] !== undefined) counts[m.status]++;
+  }
+  for (const key of Object.keys(counts)) {
+    const el = document.getElementById("cnt-" + key);
+    if (el) el.textContent = counts[key] ? `(${counts[key]})` : "";
+  }
 }
 
 function statusBadge(m) {
@@ -288,6 +328,8 @@ function render() {
   const rowsEl = document.getElementById("rows");
   const emptyEl = document.getElementById("empty");
   rowsEl.innerHTML = "";
+
+  updateStatusCounts();
 
   const activeFilters = [...state.active];
   let shown = 0;
