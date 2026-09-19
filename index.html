@@ -174,7 +174,7 @@
   <div class="sub">futbolverileri.com verisiyle canlı/biten maçları istatistik kombinasyonuna göre süz.</div>
 
   <div class="filters" id="filters"></div>
-  <div class="sub" style="margin:-6px 0 10px;">İstatistik filtreleri yalnızca skoru olan (devam eden/biten) maçlara uygulanır.</div>
+  <div class="sub" style="margin:-6px 0 10px;">İstatistik filtreleri yalnızca skoru olan (devam eden/biten) maçlara uygulanır. Henüz başlamamış maçlarda "H2H" sütunu iki takımın geçmiş karşılaşma istatistiklerini gösterir — bu bir kesin sonuç garantisi değil, sadece geçmişe dayalı bir eğilimdir.</div>
 
   <div class="status-tabs" id="status-tabs">
     <div class="status-tab active" data-status="Playing">Devam eden <span class="count" id="cnt-Playing"></span></div>
@@ -201,7 +201,7 @@
         <th>İY</th>
         <th>MS</th>
         <th>Durum</th>
-        <th>Uyan filtreler</th>
+        <th>Uyan filtreler / H2H</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -225,7 +225,28 @@ const state = {
   active: new Set(),
   status: new Set(["Playing", "Played"]), // sekmelerle seçilen durumlar
   matches: [],
+  h2h: {}, // matchId -> { played, homeWinsPercent, awayWinsPercent, drawsPercent, stats: [...] }
 };
+
+// H2H sonuçlarını localStorage'da kısa süre önbellekte tut (maç id'leri
+// zamanla değiştiği için burada eski kayıtları büyütmemek adına basit
+// bir boyut sınırı var).
+const H2H_KEY = "mb_h2h_v1";
+function loadH2HCache() {
+  try { return JSON.parse(localStorage.getItem(H2H_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveH2HCache() {
+  try {
+    const keys = Object.keys(state.h2h);
+    if (keys.length > 500) {
+      // çok büyürse en eski 200 kaydı at
+      keys.slice(0, 200).forEach(k => delete state.h2h[k]);
+    }
+    localStorage.setItem(H2H_KEY, JSON.stringify(state.h2h));
+  } catch { /* localStorage dolu olabilir, sessizce geç */ }
+}
+state.h2h = loadH2HCache();
 
 // ---- isim hafızası (localStorage) ----
 const NAMES_KEY = "mb_names_v1";
@@ -301,6 +322,59 @@ function statusBadge(m) {
 const attemptedIds = new Set();
 let enriching = false;
 
+// ---- H2H (karşılıklı maç geçmişi) zenginleştirme, sadece Fixture maçlar için ----
+const attemptedH2H = new Set();
+let enrichingH2H = false;
+
+async function enrichH2H(matchIds) {
+  if (enrichingH2H || matchIds.length === 0) return;
+  enrichingH2H = true;
+  try {
+    const res = await fetch("/api/h2h?ids=" + matchIds.map(encodeURIComponent).join(","));
+    const json = await res.json();
+    if (json.success) {
+      let changed = false;
+      for (const id of matchIds) {
+        const d = json.data[id];
+        if (d) { state.h2h[id] = d; changed = true; }
+      }
+      if (changed) { saveH2HCache(); render(); }
+    }
+  } catch {
+    // sessizce geç, bir sonraki yenilemede tekrar denenecek
+  } finally {
+    enrichingH2H = false;
+  }
+}
+
+// H2H istatistik dizisinden belirli bir başlığı bulup okunur formatta döner
+function pickH2HStat(stats, name) {
+  const s = (stats || []).find(x => x.name === name);
+  return s ? s.val : null;
+}
+
+function h2hSummaryHTML(m) {
+  const h = state.h2h[m.id];
+  if (!h) return `<span style="color:var(--muted);font-size:11px;">H2H yükleniyor…</span>`;
+  if (!h.played) return `<span style="color:var(--muted);font-size:11px;">H2H geçmişi yok</span>`;
+
+  const over25 = pickH2HStat(h.stats, "Over 2.5 Goals");
+  const btts = pickH2HStat(h.stats, "Both Teams To Score");
+  const avgGoals = pickH2HStat(h.stats, "Avg Goals PG");
+
+  const parts = [
+    `<span class="flag-yes">${h.played} maç H2H</span>`,
+    `<span class="flag-yes">Ev %${h.homeWinsPercent ?? "?"}</span>`,
+    `<span class="flag-yes">Ber %${h.drawsPercent ?? "?"}</span>`,
+    `<span class="flag-yes">Dep %${h.awayWinsPercent ?? "?"}</span>`,
+  ];
+  if (over25 !== null) parts.push(`<span class="flag-yes">2.5Ü ${over25}</span>`);
+  if (btts !== null) parts.push(`<span class="flag-yes">KG ${btts}</span>`);
+  if (avgGoals !== null) parts.push(`<span class="flag-yes">Ort ${avgGoals} gol</span>`);
+
+  return `<div class="flagset">${parts.join("")}</div>`;
+}
+
 async function enrichNames(matchIds) {
   if (enriching || matchIds.length === 0) return;
   enriching = true;
@@ -335,6 +409,7 @@ function render() {
   const activeFilters = [...state.active];
   let shown = 0;
   const needsEnrich = [];
+  const needsH2H = [];
 
   for (const m of state.matches) {
     if (!statusAllowed(m.status)) continue;
@@ -355,13 +430,19 @@ function render() {
       needsEnrich.push(m.id);
     }
 
+    if (m.status === "Fixture" && !state.h2h[m.id] && !attemptedH2H.has(m.id) && needsH2H.length < 30) {
+      needsH2H.push(m.id);
+    }
+
     const tr = document.createElement("tr");
 
     const iyText = (m.hp1 !== null && m.ap1 !== null) ? `${m.hp1}-${m.ap1}` : "—";
     const msText = (m.hscore !== null && m.ascore !== null) ? `${m.hscore}-${m.ascore}` : "—";
 
-    const matchedFlags = FILTERS.filter(f => m.flags[f.key] === true).map(f =>
-      `<span class="flag-yes">${f.label}</span>`).join("");
+    const lastCol = (m.status === "Fixture")
+      ? h2hSummaryHTML(m)
+      : (FILTERS.filter(f => m.flags[f.key] === true).map(f =>
+          `<span class="flag-yes">${f.label}</span>`).join("") || "—");
 
     tr.innerHTML = `
       <td class="league" data-id="${m.leagueId}">${leagueLabel(m.leagueId)}</td>
@@ -370,7 +451,7 @@ function render() {
       <td class="score ht-score">${iyText}</td>
       <td class="score">${msText}</td>
       <td>${statusBadge(m)}</td>
-      <td><div class="flagset">${matchedFlags || "—"}</div></td>
+      <td><div class="flagset">${lastCol}</div></td>
     `;
     rowsEl.appendChild(tr);
   }
@@ -389,6 +470,10 @@ function render() {
   if (needsEnrich.length > 0) {
     needsEnrich.forEach(id => attemptedIds.add(id));
     enrichNames(needsEnrich);
+  }
+  if (needsH2H.length > 0) {
+    needsH2H.forEach(id => attemptedH2H.add(id));
+    enrichH2H(needsH2H);
   }
 }
 

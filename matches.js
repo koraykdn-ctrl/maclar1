@@ -15,10 +15,18 @@ export default async function handler(req, res) {
     }
 
     const matches = json.data.map((m) => {
-      const hp1 = typeof m.hp1 === "number" ? m.hp1 : null;
-      const ap1 = typeof m.ap1 === "number" ? m.ap1 : null;
-      const hscore = typeof m.hscore === "number" ? m.hscore : null;
-      const ascore = typeof m.ascore === "number" ? m.ascore : null;
+      // Kaynak API, henüz başlamamış/oynanmayan maçlarda skor alanlarını
+      // bazen null yerine 0 (veya başka bir sayı) döndürüyor. Bu yüzden
+      // "gerçekten skoru var mı" kararını status alanına göre veriyoruz:
+      // sadece Playing/Played durumundaki maçların skor/İY verisi geçerli
+      // sayılır, diğer tüm durumlarda (Fixture, Postponed, Cancelled,
+      // Suspended, bilinmeyen) skor alanları zorla null'a çekilir.
+      const hasStarted = m.status === "Playing" || m.status === "Played";
+
+      const hp1 = hasStarted && typeof m.hp1 === "number" ? m.hp1 : null;
+      const ap1 = hasStarted && typeof m.ap1 === "number" ? m.ap1 : null;
+      const hscore = hasStarted && typeof m.hscore === "number" ? m.hscore : null;
+      const ascore = hasStarted && typeof m.ascore === "number" ? m.ascore : null;
 
       const hasHT = hp1 !== null && ap1 !== null;
       const hasFT = hscore !== null && ascore !== null;

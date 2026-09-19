@@ -19,6 +19,11 @@ Birden fazla filtre seçilirse **VE (AND)** mantığıyla çalışır.
   çeker, her maç için filtre bayraklarını (true/false) hesaplar ve tarayıcıya
   döner. (CORS sorunlarını önlemek ve hesaplama mantığını tek yerde tutmak için
   proxy olarak kullanılıyor.)
+- `/api/h2h.js` — henüz başlamamış (Fixture) maçlar için
+  `santra24.6stats.com/.../match/{id}/h2h/all/stats` adresinden iki takımın
+  karşılıklı maç geçmişi istatistiklerini çeker (kaç maç oynanmış, ev/deplasman/
+  beraberlik yüzdeleri, 2.5 üst, KG var, ortalama gol vb.). Bu **kesin bir
+  tahmin değildir**, sadece geçmiş karşılaşmalara dayalı bir eğilim özetidir.
 - `index.html` — arayüz. 30 saniyede bir otomatik yenilenir (kapatılabilir).
 
 ## Takım / lig isimleri
