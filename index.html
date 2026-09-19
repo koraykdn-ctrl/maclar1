@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maç Bulucu — İstatistik Filtresi</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e7e9ee;
+    --muted: #9aa1ad;
+    --accent: #2fbf71;
+    --accent-dim: #1c7a47;
+    --live: #e0a72f;
+    --danger: #e05a4e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px 20px 8px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 5;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0 14px;
+  }
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    background: var(--panel);
+  }
+  .chip.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: #fff;
+  }
+  .chip input { display: none; }
+
+  .status-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .status-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding-bottom: 8px;
+  }
+  button.refresh {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  button.refresh:hover { border-color: var(--accent); }
+
+  main { padding: 8px 20px 40px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 500;
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 122px;
+    background: var(--bg);
+  }
+  tbody td {
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  tbody tr:hover { background: #1a1d25; }
+
+  .team {
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+  }
+  .team:hover { border-bottom-color: var(--muted); }
+
+  .league { color: var(--muted); font-size: 12px; cursor: pointer; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.live { background: rgba(224,167,47,.15); color: var(--live); }
+  .badge.ft { background: rgba(154,161,173,.15); color: var(--muted); }
+  .badge.ht { background: rgba(224,167,47,.15); color: var(--live); }
+
+  .score { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ht-score { color: var(--muted); font-size: 12px; }
+
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+  .flagset { display: flex; gap: 4px; flex-wrap: wrap; }
+  .flag-yes {
+    font-size: 10px;
+    background: rgba(47,191,113,.15);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚽ Maç Bulucu — İstatistik Filtresi</h1>
+  <div class="sub">futbolverileri.com verisiyle canlı/biten maçları istatistik kombinasyonuna göre süz.</div>
+
+  <div class="filters" id="filters"></div>
+
+  <div class="status-row">
+    <span>Durum:</span>
+    <label><input type="checkbox" id="st-playing" checked /> Devam eden</label>
+    <label><input type="checkbox" id="st-played" checked /> Biten</label>
+    <label><input type="checkbox" id="st-fixture" /> Henüz başlamamış</label>
+  </div>
+
+  <div class="toolbar">
+    <span id="summary">yükleniyor…</span>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <label style="display:flex; align-items:center; gap:4px;"><input type="checkbox" id="auto-refresh" checked /> Otomatik yenile (30sn)</label>
+      <button class="refresh" id="refresh-btn">↻ Yenile</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <table>
+    <thead>
+      <tr>
+        <th>Lig</th>
+        <th>Ev Sahibi</th>
+        <th>Deplasman</th>
+        <th>İY</th>
+        <th>MS</th>
+        <th>Durum</th>
+        <th>Uyan filtreler</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none;">Seçili filtrelere uyan maç yok.</div>
+</main>
+
+<script>
+const FILTERS = [
+  { key: "iy05ust",   label: "İY 0.5 Üst" },
+  { key: "iy15ust",   label: "İY 1.5 Üst" },
+  { key: "iykgvar",   label: "İY KG Var" },
+  { key: "iy2y05ust", label: "2Y 0.5 Üst" },
+  { key: "ms25ust",   label: "MS 2.5 Üst" },
+  { key: "ms25alt",   label: "MS 2.5 Alt" },
+  { key: "ms35ust",   label: "MS 3.5 Üst" },
+  { key: "ms35alt",   label: "MS 3.5 Alt" },
+];
+
+const state = {
+  active: new Set(),
+  matches: [],
+};
+
+// ---- isim hafızası (localStorage) ----
+const NAMES_KEY = "mb_names_v1";
+function loadNames() {
+  try { return JSON.parse(localStorage.getItem(NAMES_KEY)) || { team: {}, league: {} }; }
+  catch { return { team: {}, league: {} }; }
+}
+function saveNames(n) { localStorage.setItem(NAMES_KEY, JSON.stringify(n)); }
+let NAMES = loadNames();
+
+function teamLabel(id) { return NAMES.team[id] || ("Takım #" + id); }
+function leagueLabel(id) { return NAMES.league[id] || ("Lig #" + id); }
+
+function promptRename(kind, id, currentLabel) {
+  const val = prompt((kind === "team" ? "Takım" : "Lig") + " #" + id + " için isim gir:", currentLabel);
+  if (val === null) return;
+  const trimmed = val.trim();
+  if (!trimmed) { delete NAMES[kind][id]; }
+  else { NAMES[kind][id] = trimmed; }
+  saveNames(NAMES);
+  render();
+}
+
+// ---- filtre çipleri ----
+const filtersEl = document.getElementById("filters");
+FILTERS.forEach(f => {
+  const chip = document.createElement("label");
+  chip.className = "chip";
+  chip.innerHTML = `<input type="checkbox" value="${f.key}" /> ${f.label}`;
+  const input = chip.querySelector("input");
+  input.addEventListener("change", () => {
+    if (input.checked) state.active.add(f.key); else state.active.delete(f.key);
+    chip.classList.toggle("active", input.checked);
+    render();
+  });
+  filtersEl.appendChild(chip);
+});
+
+document.getElementById("st-playing").addEventListener("change", render);
+document.getElementById("st-played").addEventListener("change", render);
+document.getElementById("st-fixture").addEventListener("change", render);
+
+function statusAllowed(status) {
+  if (status === "Playing" && document.getElementById("st-playing").checked) return true;
+  if (status === "Played" && document.getElementById("st-played").checked) return true;
+  if (status === "Fixture" && document.getElementById("st-fixture").checked) return true;
+  return false;
+}
+
+function statusBadge(m) {
+  if (m.status === "Playing") return `<span class="badge live">${m.st || (m.min + "'")}</span>`;
+  if (m.status === "Played") return `<span class="badge ft">MS</span>`;
+  if (m.status === "Fixture") return `<span class="badge">Başlamadı</span>`;
+  return `<span class="badge">${m.st || m.status || ""}</span>`;
+}
+
+function render() {
+  const rowsEl = document.getElementById("rows");
+  const emptyEl = document.getElementById("empty");
+  rowsEl.innerHTML = "";
+
+  const activeFilters = [...state.active];
+  let shown = 0;
+
+  for (const m of state.matches) {
+    if (!statusAllowed(m.status)) continue;
+
+    // seçili tüm filtreler true olmalı (bilinmeyen/null ise eleniyor)
+    const passes = activeFilters.every(k => m.flags[k] === true);
+    if (!passes) continue;
+
+    shown++;
+    const tr = document.createElement("tr");
+
+    const iyText = (m.hp1 !== null && m.ap1 !== null) ? `${m.hp1}-${m.ap1}` : "—";
+    const msText = (m.hscore !== null && m.ascore !== null) ? `${m.hscore}-${m.ascore}` : "—";
+
+    const matchedFlags = FILTERS.filter(f => m.flags[f.key] === true).map(f =>
+      `<span class="flag-yes">${f.label}</span>`).join("");
+
+    tr.innerHTML = `
+      <td class="league" data-id="${m.leagueId}">${leagueLabel(m.leagueId)}</td>
+      <td class="team" data-kind="team" data-id="${m.homeId}">${teamLabel(m.homeId)}</td>
+      <td class="team" data-kind="team" data-id="${m.awayId}">${teamLabel(m.awayId)}</td>
+      <td class="score ht-score">${iyText}</td>
+      <td class="score">${msText}</td>
+      <td>${statusBadge(m)}</td>
+      <td><div class="flagset">${matchedFlags || "—"}</div></td>
+    `;
+    rowsEl.appendChild(tr);
+  }
+
+  rowsEl.querySelectorAll(".team").forEach(el => {
+    el.addEventListener("click", () => promptRename("team", el.dataset.id, teamLabel(el.dataset.id)));
+  });
+  rowsEl.querySelectorAll(".league").forEach(el => {
+    el.addEventListener("click", () => promptRename("league", el.dataset.id, leagueLabel(el.dataset.id)));
+  });
+
+  emptyEl.style.display = shown === 0 ? "block" : "none";
+  document.getElementById("summary").textContent =
+    `${shown} maç gösteriliyor (${state.matches.length} toplam) — son güncelleme: ${new Date().toLocaleTimeString("tr-TR")}`;
+}
+
+async function fetchMatches() {
+  document.getElementById("summary").textContent = "yükleniyor…";
+  try {
+    const res = await fetch("/api/matches");
+    const json = await res.json();
+    if (json.success) {
+      state.matches = json.matches;
+      render();
+    } else {
+      document.getElementById("summary").textContent = "Hata: " + (json.error || "bilinmeyen");
+    }
+  } catch (e) {
+    document.getElementById("summary").textContent = "Bağlantı hatası";
+  }
+}
+
+document.getElementById("refresh-btn").addEventListener("click", fetchMatches);
+
+let timer = null;
+function setupAutoRefresh() {
+  if (timer) clearInterval(timer);
+  if (document.getElementById("auto-refresh").checked) {
+    timer = setInterval(fetchMatches, 30000);
+  }
+}
+document.getElementById("auto-refresh").addEventListener("change", setupAutoRefresh);
+
+fetchMatches();
+setupAutoRefresh();
+</script>
+
+</body>
+</html>
