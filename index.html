@@ -174,6 +174,7 @@
   <div class="sub">futbolverileri.com verisiyle canlı/biten maçları istatistik kombinasyonuna göre süz.</div>
 
   <div class="filters" id="filters"></div>
+  <div class="sub" style="margin:-6px 0 10px;">İstatistik filtreleri yalnızca skoru olan (devam eden/biten) maçlara uygulanır.</div>
 
   <div class="status-tabs" id="status-tabs">
     <div class="status-tab active" data-status="Playing">Devam eden <span class="count" id="cnt-Playing"></span></div>
@@ -338,8 +339,13 @@ function render() {
   for (const m of state.matches) {
     if (!statusAllowed(m.status)) continue;
 
-    // seçili tüm filtreler true olmalı (bilinmeyen/null ise eleniyor)
-    const passes = activeFilters.every(k => m.flags[k] === true);
+    // İstatistik filtreleri sadece skoru olan (Devam eden / Biten) maçlara
+    // uygulanır — henüz başlamamış maçlarda skor olmadığı için bu filtreler
+    // anlamsızdır ve her zaman elenirlerdi. Fixture maçlar sekme açıkken
+    // filtre seçimine bakılmaksızın listelenir.
+    const passes = (m.status === "Fixture")
+      ? true
+      : activeFilters.every(k => m.flags[k] === true);
     if (!passes) continue;
 
     shown++;
