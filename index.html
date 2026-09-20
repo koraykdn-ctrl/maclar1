@@ -165,6 +165,48 @@
     padding: 1px 6px;
     border-radius: 4px;
   }
+
+  .presets-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+  }
+  .presets-label { color: var(--muted); font-size: 12px; }
+  .presets-list { display: flex; gap: 6px; flex-wrap: wrap; }
+  .preset-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--accent);
+    background: rgba(47,191,113,.12);
+    color: var(--text);
+    padding: 5px 6px 5px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .preset-chip:hover { background: rgba(47,191,113,.22); }
+  .preset-chip .del {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 999px;
+  }
+  .preset-chip .del:hover { color: var(--danger); background: rgba(224,90,78,.15); }
+  .preset-save-btn {
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .preset-save-btn:hover { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -173,6 +215,12 @@
   <h1>⚽ Maç Bulucu — İstatistik Filtresi</h1>
   <div class="sub">futbolverileri.com verisiyle canlı/biten maçları istatistik kombinasyonuna göre süz.</div>
 
+  <div class="presets-row" id="presets-row">
+    <span class="presets-label">Hazır kombinasyonlar:</span>
+    <div class="presets-list" id="presets-list"></div>
+    <button class="preset-save-btn" id="preset-save-btn">+ Şu anki seçimi kaydet</button>
+  </div>
+
   <div class="filters" id="filters"></div>
   <div class="sub" style="margin:-6px 0 10px;">İstatistik filtreleri yalnızca skoru olan (devam eden/biten) maçlara uygulanır. Henüz başlamamış maçlarda "H2H" sütunu iki takımın geçmiş karşılaşma istatistiklerini gösterir — bu bir kesin sonuç garantisi değil, sadece geçmişe dayalı bir eğilimdir.</div>
 
@@ -180,6 +228,15 @@
     <div class="status-tab active" data-status="Playing">Devam eden <span class="count" id="cnt-Playing"></span></div>
     <div class="status-tab active" data-status="Played">Biten <span class="count" id="cnt-Played"></span></div>
     <div class="status-tab fixture" data-status="Fixture">Henüz başlamamış <span class="count" id="cnt-Fixture"></span></div>
+  </div>
+
+  <div class="status-row" id="trend-controls" style="display:none;">
+    <label>H2H eğilim eşiği:
+      <input type="number" id="trend-threshold" min="0" max="100" step="5" value="70" style="width:54px;" /> %+
+    </label>
+    <label><input type="checkbox" id="sort-by-trend" /> Sadece başlamamış maçları eğilime göre sırala</label>
+    <label><input type="checkbox" id="filter-by-trend" /> Eşiğin altındakileri gizle</label>
+    <span style="color:var(--muted);font-size:11px;">(⇄/E/D rozeti: iki takımın birbirine karşı geçmişinde, kendi sahasındaki H2H maçlarına göre)</span>
   </div>
 
   <div class="toolbar">
@@ -272,6 +329,7 @@ function promptRename(kind, id, currentLabel) {
 
 // ---- filtre çipleri ----
 const filtersEl = document.getElementById("filters");
+const chipEls = {}; // key -> {chip, input}
 FILTERS.forEach(f => {
   const chip = document.createElement("label");
   chip.className = "chip";
@@ -283,17 +341,110 @@ FILTERS.forEach(f => {
     render();
   });
   filtersEl.appendChild(chip);
+  chipEls[f.key] = { chip, input };
 });
 
+// Bir filtre+durum kombinasyonunu tek seferde uygular (preset uygulamak için).
+function applyFilterSet(filterKeys, statusKeys) {
+  state.active = new Set(filterKeys);
+  state.status = new Set(statusKeys);
+
+  FILTERS.forEach(f => {
+    const on = state.active.has(f.key);
+    chipEls[f.key].input.checked = on;
+    chipEls[f.key].chip.classList.toggle("active", on);
+  });
+  document.querySelectorAll(".status-tab").forEach(tab => {
+    tab.classList.toggle("active", state.status.has(tab.dataset.status));
+  });
+
+  updateTrendControlsVisibility();
+  render();
+}
+
 // ---- durum sekmeleri (Devam eden / Biten / Henüz başlamamış) ----
+function updateTrendControlsVisibility() {
+  document.getElementById("trend-controls").style.display =
+    state.status.has("Fixture") ? "flex" : "none";
+}
+
 document.querySelectorAll(".status-tab").forEach(tab => {
   tab.addEventListener("click", () => {
     const s = tab.dataset.status;
     if (state.status.has(s)) state.status.delete(s);
     else state.status.add(s);
     tab.classList.toggle("active", state.status.has(s));
+    updateTrendControlsVisibility();
     render();
   });
+});
+updateTrendControlsVisibility();
+
+document.getElementById("trend-threshold").addEventListener("input", render);
+document.getElementById("sort-by-trend").addEventListener("change", render);
+document.getElementById("filter-by-trend").addEventListener("change", render);
+
+// ---- hazır kombinasyonlar (presets) ----
+const PRESETS_KEY = "mb_presets_v1";
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY)) || []; }
+  catch { return []; }
+}
+function savePresets(list) {
+  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(list)); } catch { /* dolu olabilir */ }
+}
+let presets = loadPresets();
+// İlk kullanımda (kayıtlı hiç kombinasyon yoksa) sık istenen bir kombinasyonu
+// hazır olarak ekliyoruz: İY 0.5/1.5 Üst, İY KG Var, MS 2.5/3.5 Üst.
+if (presets.length === 0) {
+  presets.push({
+    name: "Çok Gollü Maçlar (İY+MS)",
+    filters: ["iy05ust", "iy15ust", "iykgvar", "ms25ust", "ms35ust"],
+    status: ["Playing", "Played"],
+  });
+  savePresets(presets);
+}
+
+function renderPresets() {
+  const list = document.getElementById("presets-list");
+  list.innerHTML = "";
+  if (presets.length === 0) {
+    list.innerHTML = `<span style="color:var(--muted);font-size:12px;">henüz kaydedilmiş kombinasyon yok</span>`;
+    return;
+  }
+  presets.forEach((p, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "preset-chip";
+    chip.innerHTML = `<span>${p.name}</span><span class="del" title="Sil">✕</span>`;
+    chip.querySelector("span:first-child").addEventListener("click", () => {
+      applyFilterSet(p.filters, p.status);
+    });
+    chip.querySelector(".del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!confirm(`"${p.name}" kombinasyonunu silmek istediğine emin misin?`)) return;
+      presets.splice(idx, 1);
+      savePresets(presets);
+      renderPresets();
+    });
+    list.appendChild(chip);
+  });
+}
+renderPresets();
+
+document.getElementById("preset-save-btn").addEventListener("click", () => {
+  if (state.active.size === 0) {
+    alert("Önce en az bir filtre seçmelisin.");
+    return;
+  }
+  const name = prompt("Bu kombinasyona bir isim ver (örn. \"Gollü maçlar\"):");
+  if (!name || !name.trim()) return;
+  presets.push({
+    name: name.trim(),
+    filters: [...state.active],
+    status: [...state.status],
+  });
+  savePresets(presets);
+  renderPresets();
 });
 
 function statusAllowed(status) {
@@ -352,25 +503,84 @@ function pickH2HStat(stats, name) {
   const s = (stats || []).find(x => x.name === name);
   return s ? s.val : null;
 }
+function pctNum(val) {
+  if (val === null || val === undefined) return null;
+  const n = parseInt(String(val).replace("%", ""), 10);
+  return Number.isNaN(n) ? null : n;
+}
 
-function h2hSummaryHTML(m) {
+// Eğilim hesabında bakacağımız istatistik başlıkları (h2hname ile birebir eşleşmeli).
+// API'nin döndürdüğü tüm yüzdesel H2H başlıkları (Avg Goals PG hariç, o bir
+// yüzde değil ortalama sayı olduğu için ayrı gösteriliyor, eğilim hesabına
+// katılmıyor).
+const TREND_KEYS = [
+  "1H Over 0.5 Goals",
+  "Over 1.5 Goals",
+  "Over 2.5 Goals",
+  "Over 3.5 Goals",
+  "Both Teams To Score",
+  "BTTS & Over 2.5 Goals",
+  "Goal in Both Halves",
+];
+
+// Bir maçın H2H verisinden "en güçlü eğilimi" bulur: {score, key} ya da null
+function computeTrendScore(h) {
+  if (!h || !h.all || !h.all.played) return null;
+  let best = null;
+  for (const key of TREND_KEYS) {
+    const p = pctNum(pickH2HStat(h.all.stats, key));
+    if (p !== null && (best === null || p > best.score)) best = { score: p, key };
+  }
+  return best;
+}
+
+// En güçlü eğilimin iki takım için de (H2H'de ev sahibiyken / deplasmandayken)
+// aynı yönde olup olmadığına bakar: "⇄" çift taraflı, "E"/"D" tek taraflı, null yoksa.
+function computeDirectionBadge(h, key, threshold) {
+  if (!h || !key) return null;
+  const homeVal = pctNum(pickH2HStat(h.home && h.home.stats, key));
+  const awayVal = pctNum(pickH2HStat(h.away && h.away.stats, key));
+  const homeHigh = homeVal !== null && homeVal >= threshold;
+  const awayHigh = awayVal !== null && awayVal >= threshold;
+  if (homeHigh && awayHigh) return "⇄";
+  if (homeHigh) return "E";
+  if (awayHigh) return "D";
+  return null;
+}
+
+function h2hSummaryHTML(m, threshold) {
   const h = state.h2h[m.id];
   if (!h) return `<span style="color:var(--muted);font-size:11px;">H2H yükleniyor…</span>`;
-  if (!h.played) return `<span style="color:var(--muted);font-size:11px;">H2H geçmişi yok</span>`;
+  if (!h.all || !h.all.played) return `<span style="color:var(--muted);font-size:11px;">H2H geçmişi yok</span>`;
 
-  const over25 = pickH2HStat(h.stats, "Over 2.5 Goals");
-  const btts = pickH2HStat(h.stats, "Both Teams To Score");
-  const avgGoals = pickH2HStat(h.stats, "Avg Goals PG");
+  const avgGoals = pickH2HStat(h.all.stats, "Avg Goals PG");
+  const trend = computeTrendScore(h);
+  const badge = trend ? computeDirectionBadge(h, trend.key, threshold) : null;
+  const lowSample = h.all.played < 3;
+
+  // kısa etiket eşlemesi — tabloda yer kaplamasın diye
+  const SHORT_LABEL = {
+    "1H Over 0.5 Goals": "İY0.5Ü",
+    "Over 1.5 Goals": "1.5Ü",
+    "Over 2.5 Goals": "2.5Ü",
+    "Over 3.5 Goals": "3.5Ü",
+    "Both Teams To Score": "KG",
+    "BTTS & Over 2.5 Goals": "KG&2.5Ü",
+    "Goal in Both Halves": "İYY&2YY",
+  };
 
   const parts = [
-    `<span class="flag-yes">${h.played} maç H2H</span>`,
-    `<span class="flag-yes">Ev %${h.homeWinsPercent ?? "?"}</span>`,
-    `<span class="flag-yes">Ber %${h.drawsPercent ?? "?"}</span>`,
-    `<span class="flag-yes">Dep %${h.awayWinsPercent ?? "?"}</span>`,
+    `<span class="flag-yes">${h.all.played} maç H2H${lowSample ? " (az veri)" : ""}</span>`,
+    `<span class="flag-yes">Ev %${h.all.homeWinsPercent ?? "?"}</span>`,
+    `<span class="flag-yes">Ber %${h.all.drawsPercent ?? "?"}</span>`,
+    `<span class="flag-yes">Dep %${h.all.awayWinsPercent ?? "?"}</span>`,
   ];
-  if (over25 !== null) parts.push(`<span class="flag-yes">2.5Ü ${over25}</span>`);
-  if (btts !== null) parts.push(`<span class="flag-yes">KG ${btts}</span>`);
   if (avgGoals !== null) parts.push(`<span class="flag-yes">Ort ${avgGoals} gol</span>`);
+  for (const key of TREND_KEYS) {
+    const val = pickH2HStat(h.all.stats, key);
+    if (val !== null) parts.push(`<span class="flag-yes">${SHORT_LABEL[key]} ${val}</span>`);
+  }
+  if (badge) parts.push(`<span class="flag-yes" title="${trend.key}: ${trend.score}%">${badge} ${trend.key} ${trend.score}%</span>`);
 
   return `<div class="flagset">${parts.join("")}</div>`;
 }
@@ -407,9 +617,13 @@ function render() {
   updateStatusCounts();
 
   const activeFilters = [...state.active];
-  let shown = 0;
   const needsEnrich = [];
   const needsH2H = [];
+  const eligible = []; // { m, trend } — trend sadece Fixture maçlar için dolu
+
+  const trendThreshold = parseInt(document.getElementById("trend-threshold").value, 10) || 0;
+  const sortByTrend = document.getElementById("sort-by-trend").checked;
+  const filterByTrend = document.getElementById("filter-by-trend").checked;
 
   for (const m of state.matches) {
     if (!statusAllowed(m.status)) continue;
@@ -423,16 +637,41 @@ function render() {
       : activeFilters.every(k => m.flags[k] === true);
     if (!passes) continue;
 
-    shown++;
-
     const missingName = !NAMES.team[m.homeId] || !NAMES.team[m.awayId] || !NAMES.league[m.leagueId];
     if (missingName && !attemptedIds.has(m.id) && needsEnrich.length < 40) {
       needsEnrich.push(m.id);
     }
 
-    if (m.status === "Fixture" && !state.h2h[m.id] && !attemptedH2H.has(m.id) && needsH2H.length < 30) {
-      needsH2H.push(m.id);
+    let trend = null;
+    if (m.status === "Fixture") {
+      if (!state.h2h[m.id] && !attemptedH2H.has(m.id) && needsH2H.length < 30) {
+        needsH2H.push(m.id);
+      }
+      trend = computeTrendScore(state.h2h[m.id]);
+      // "eşiğin altındakileri gizle" sadece H2H'si zaten yüklenmiş fixture'lara
+      // uygulanır; henüz yüklenmemiş olanlar gizlenmez (aksi halde her yenilemede
+      // kısa süreliğine kaybolup görünürler).
+      if (filterByTrend && state.h2h[m.id] && (!trend || trend.score < trendThreshold)) continue;
     }
+
+    eligible.push({ m, trend });
+  }
+
+  if (sortByTrend) {
+    eligible.sort((a, b) => {
+      const sa = a.trend ? a.trend.score : (a.m.status === "Fixture" ? -1 : null);
+      const sb = b.trend ? b.trend.score : (b.m.status === "Fixture" ? -1 : null);
+      // Fixture olmayanları (Devam eden/Biten) her zaman en üstte, mevcut sırayla tut
+      if (a.m.status !== "Fixture" && b.m.status !== "Fixture") return 0;
+      if (a.m.status !== "Fixture") return -1;
+      if (b.m.status !== "Fixture") return 1;
+      return (sb ?? -1) - (sa ?? -1);
+    });
+  }
+
+  let shown = 0;
+  for (const { m } of eligible) {
+    shown++;
 
     const tr = document.createElement("tr");
 
@@ -440,7 +679,7 @@ function render() {
     const msText = (m.hscore !== null && m.ascore !== null) ? `${m.hscore}-${m.ascore}` : "—";
 
     const lastCol = (m.status === "Fixture")
-      ? h2hSummaryHTML(m)
+      ? h2hSummaryHTML(m, trendThreshold)
       : (FILTERS.filter(f => m.flags[f.key] === true).map(f =>
           `<span class="flag-yes">${f.label}</span>`).join("") || "—");
 
